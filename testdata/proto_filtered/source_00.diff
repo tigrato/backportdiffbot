@@ -1,0 +1,13 @@
+diff --git a/api/client/authservice.pb.go b/api/client/authservice.pb.go
+index 1111111..2222222 100644
+--- a/api/client/authservice.pb.go
++++ b/api/client/authservice.pb.go
+@@ -1,1 +1,1 @@
+-// old generated line
++// new generated line
+diff --git a/lib/auth/auth.go b/lib/auth/auth.go
+index 3333333..4444444 100644
+--- a/lib/auth/auth.go
++++ b/lib/auth/auth.go
+@@ -11,0 +11,1 @@
++	log.Info("check done")

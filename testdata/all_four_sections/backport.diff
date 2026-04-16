@@ -1,0 +1,8 @@
+diff --git a/lib/events/emitter.go b/lib/events/emitter.go
+index 3333333..4444444 100644
+--- a/lib/events/emitter.go
++++ b/lib/events/emitter.go
+@@ -8,1 +8,0 @@
+-	e.legacyHook()
+@@ -12,0 +12,1 @@
++	e.metrics.record(ev)

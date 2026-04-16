@@ -1,0 +1,8 @@
+diff --git a/lib/events/emitter.go b/lib/events/emitter.go
+index 1111111..2222222 100644
+--- a/lib/events/emitter.go
++++ b/lib/events/emitter.go
+@@ -5,1 +5,0 @@
+-	// legacy comment
+@@ -10,0 +10,1 @@
++	e.count++

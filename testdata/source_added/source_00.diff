@@ -1,0 +1,11 @@
+diff --git a/lib/srv/handler.go b/lib/srv/handler.go
+index 1111111..2222222 100644
+--- a/lib/srv/handler.go
++++ b/lib/srv/handler.go
+@@ -7,0 +7,6 @@
++	logResult()
++	cleanup()
++
++func newHelper() string {
++	return "helper"
++}

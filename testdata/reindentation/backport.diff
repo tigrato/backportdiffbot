@@ -1,0 +1,10 @@
+diff --git a/lib/srv/session.go b/lib/srv/session.go
+index 3333333..4444444 100644
+--- a/lib/srv/session.go
++++ b/lib/srv/session.go
+@@ -7,0 +7,5 @@
++	synctest.Run(func() {
++		if err := validate(ctx); err != nil {
++			return err
++		}
++	})

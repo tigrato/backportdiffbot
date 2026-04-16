@@ -1,0 +1,12 @@
+Backport PR:  https://github.com/acme/myrepo/pull/200 -- Test backport
+Source PRs:   https://github.com/acme/myrepo/pull/100 (resolved via body markers)
+
+diff -- lib/events/emitter.go
+  source added, backport missing:
+	+ e.count++
+  source removed, backport kept:
+	- // legacy comment
+  backport added, source missing:
+	+ e.metrics.record(ev)	(backport line 12)
+  backport removed, source kept:
+	- e.legacyHook()	(backport line 8)

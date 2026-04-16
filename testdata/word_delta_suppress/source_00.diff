@@ -1,0 +1,7 @@
+diff --git a/lib/proxy/forward.go b/lib/proxy/forward.go
+index 1111111..2222222 100644
+--- a/lib/proxy/forward.go
++++ b/lib/proxy/forward.go
+@@ -5,1 +5,1 @@
+-func forward(addr, port string) error {
++func forward(port, addr string) error {

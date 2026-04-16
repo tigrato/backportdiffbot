@@ -1,0 +1,6 @@
+diff --git a/lib/srv/handler.go b/lib/srv/handler.go
+index 3333333..4444444 100644
+--- a/lib/srv/handler.go
++++ b/lib/srv/handler.go
+@@ -7,0 +7,1 @@
++	logResult()

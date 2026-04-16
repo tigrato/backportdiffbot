@@ -1,0 +1,6 @@
+diff --git a/lib/auth/auth.go b/lib/auth/auth.go
+index 1111111..2222222 100644
+--- a/lib/auth/auth.go
++++ b/lib/auth/auth.go
+@@ -10,0 +11,1 @@
++	z := 3

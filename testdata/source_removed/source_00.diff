@@ -1,0 +1,9 @@
+diff --git a/lib/auth/server.go b/lib/auth/server.go
+index 1111111..2222222 100644
+--- a/lib/auth/server.go
++++ b/lib/auth/server.go
+@@ -10,4 +10,0 @@
+-	// deprecated path
+-	if s.legacyMode {
+-		return s.startLegacy()
+-	}

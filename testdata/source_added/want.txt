@@ -1,0 +1,9 @@
+Backport PR:  https://github.com/acme/myrepo/pull/200 -- Test backport
+Source PRs:   https://github.com/acme/myrepo/pull/100 (resolved via body markers)
+
+diff -- lib/srv/handler.go
+  source added, backport missing:
+	+ cleanup()
+	+ func newHelper() string {
+	+ return "helper"
+	+ }

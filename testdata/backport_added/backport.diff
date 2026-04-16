@@ -1,0 +1,7 @@
+diff --git a/lib/cache/cache.go b/lib/cache/cache.go
+index 3333333..4444444 100644
+--- a/lib/cache/cache.go
++++ b/lib/cache/cache.go
+@@ -5,0 +5,2 @@
++	Delete(key string)
++	Clear()

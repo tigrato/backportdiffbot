@@ -1,0 +1,8 @@
+diff --git a/lib/srv/session.go b/lib/srv/session.go
+index 1111111..2222222 100644
+--- a/lib/srv/session.go
++++ b/lib/srv/session.go
+@@ -7,0 +7,3 @@
++	if err := validate(ctx); err != nil {
++		return err
++	}

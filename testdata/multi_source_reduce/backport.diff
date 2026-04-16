@@ -1,0 +1,7 @@
+diff --git a/lib/backend/dynamo.go b/lib/backend/dynamo.go
+index 4444444..5555555 100644
+--- a/lib/backend/dynamo.go
++++ b/lib/backend/dynamo.go
+@@ -20,1 +20,1 @@
+-	return nil
++	return nil

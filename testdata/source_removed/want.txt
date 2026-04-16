@@ -1,0 +1,8 @@
+Backport PR:  https://github.com/acme/myrepo/pull/200 -- Test backport
+Source PRs:   https://github.com/acme/myrepo/pull/100 (resolved via body markers)
+
+diff -- lib/auth/server.go
+  source removed, backport kept:
+	- if s.legacyMode {
+	- return s.startLegacy()
+	- }
