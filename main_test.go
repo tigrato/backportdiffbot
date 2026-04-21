@@ -5,6 +5,57 @@ import (
 	"testing"
 )
 
+func TestParsePRURL(t *testing.T) {
+	tests := []struct {
+		input      string
+		wantRepo   string
+		wantNumber int
+		wantBase   string
+		wantErr    bool
+	}{
+		{
+			input:      "https://github.com/acme/myrepo/pull/42",
+			wantRepo:   "acme/myrepo",
+			wantNumber: 42,
+			wantBase:   "https://api.github.com",
+		},
+		{
+			input:      "http://github.com/acme/myrepo/pull/42",
+			wantRepo:   "acme/myrepo",
+			wantNumber: 42,
+			wantBase:   "https://api.github.com",
+		},
+		{
+			// GitHub Enterprise host → API base derived from URL
+			input:      "https://github.example.com/acme/myrepo/pull/7",
+			wantRepo:   "acme/myrepo",
+			wantNumber: 7,
+			wantBase:   "https://github.example.com/api/v3",
+		},
+		{input: "https://github.com/acme/myrepo/pulls/42", wantErr: true},
+		{input: "https://github.com/acme/pull/42", wantErr: true},
+		{input: "not-a-url", wantErr: true},
+		{input: "https://github.com/acme/myrepo/pull/0", wantErr: true},
+	}
+	for _, tt := range tests {
+		repo, n, base, err := parsePRURL(tt.input)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("parsePRURL(%q): expected error, got repo=%q n=%d", tt.input, repo, n)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parsePRURL(%q): unexpected error: %v", tt.input, err)
+			continue
+		}
+		if repo != tt.wantRepo || n != tt.wantNumber || base != tt.wantBase {
+			t.Errorf("parsePRURL(%q) = (%q, %d, %q), want (%q, %d, %q)",
+				tt.input, repo, n, base, tt.wantRepo, tt.wantNumber, tt.wantBase)
+		}
+	}
+}
+
 func TestExtractBodyBackportPRNumbers(t *testing.T) {
 	body := strings.Join([]string{
 		"Some context",

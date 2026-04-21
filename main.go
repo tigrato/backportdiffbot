@@ -186,8 +186,22 @@ func parseConfig() (config, error) {
 	flag.BoolVar(&cfg.failOnDiff, "fail-on-diff", false, "Exit non-zero when differences are found")
 	flag.Parse()
 
+	// A bare URL argument (e.g. https://github.com/org/repo/pull/42) can be
+	// used instead of -repo/-pr.  It also auto-sets -api-base for GHE hosts.
+	if args := flag.Args(); len(args) == 1 {
+		repo, n, base, err := parsePRURL(args[0])
+		if err != nil {
+			return cfg, err
+		}
+		cfg.repo = repo
+		cfg.backportPR = n
+		if cfg.apiBase == defaultAPIBase {
+			cfg.apiBase = base
+		}
+	}
+
 	if cfg.backportPR <= 0 {
-		return cfg, errors.New("missing required -pr")
+		return cfg, errors.New("usage: backportdiffbot -pr N [-repo owner/repo] or backportdiffbot <PR URL>")
 	}
 	if _, err := url.ParseRequestURI(cfg.apiBase); err != nil {
 		return cfg, fmt.Errorf("invalid -api-base %q: %w", cfg.apiBase, err)
@@ -730,6 +744,34 @@ func splitRepo(repo string) (string, string, error) {
 		return "", "", fmt.Errorf("invalid repo %q: want owner/repo", repo)
 	}
 	return parts[0], parts[1], nil
+}
+
+// parsePRURL parses a GitHub PR URL of the form
+// https://github.com/{owner}/{repo}/pull/{number} and returns the
+// owner/repo string, PR number, and API base URL (non-github.com hosts
+// are assumed to be GitHub Enterprise with /api/v3 at the same root).
+func parsePRURL(rawURL string) (repo string, number int, apiBase string, err error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", 0, "", fmt.Errorf("invalid URL %q: %w", rawURL, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return "", 0, "", fmt.Errorf("not a GitHub PR URL: %q", rawURL)
+	}
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) != 4 || parts[2] != "pull" {
+		return "", 0, "", fmt.Errorf("not a GitHub PR URL: %q", rawURL)
+	}
+	n, err := strconv.Atoi(parts[3])
+	if err != nil || n <= 0 {
+		return "", 0, "", fmt.Errorf("invalid PR number in URL %q", rawURL)
+	}
+	repoStr := parts[0] + "/" + parts[1]
+	base := defaultAPIBase
+	if u.Host != "github.com" {
+		base = u.Scheme + "://" + u.Host + "/api/v3"
+	}
+	return repoStr, n, base, nil
 }
 
 func firstNonEmpty(values ...string) string {
