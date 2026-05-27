@@ -502,7 +502,12 @@ func buildFileDiff(path string, masterLines, backportLines []string, backportLin
 			return
 		}
 		b.WriteString(header)
-		for _, content := range lines {
+		for i := 0; i < len(lines); {
+			content := lines[i]
+			count := 1
+			for i+count < len(lines) && lines[i+count] == content {
+				count++
+			}
 			b.WriteByte('\t')
 			b.WriteByte(prefix)
 			b.WriteByte(' ')
@@ -512,7 +517,11 @@ func buildFileDiff(path string, masterLines, backportLines []string, backportLin
 					fmt.Fprintf(&b, "\t(backport line %d)", ln)
 				}
 			}
+			if count > 1 {
+				fmt.Fprintf(&b, "\t(×%d)", count)
+			}
 			b.WriteByte('\n')
+			i += count
 		}
 	}
 
