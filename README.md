@@ -19,7 +19,6 @@ A command-line tool that validates backport pull requests by comparing their dif
 ### Basic usage
 
 ```bash
-export GITHUB_TOKEN=$(gh auth token)
 ./backportdiffbot -pr 12345
 ```
 
@@ -60,10 +59,13 @@ Options:
 
 ## Authentication
 
-The tool requires a GitHub token for API access. Set one of these environment variables:
+The tool resolves a GitHub token in this order:
 
-- `GITHUB_TOKEN`
-- `GH_TOKEN`
+1. `GH_TOKEN` environment variable
+2. `GITHUB_TOKEN` environment variable
+3. `gh auth token` (if the `gh` CLI is installed and logged in)
+
+If none of these are available, requests are made unauthenticated (subject to GitHub's rate limits). To authenticate via the `gh` CLI, run `gh auth login`.
 
 The token needs read access to the repository's pull requests.
 

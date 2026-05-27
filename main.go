@@ -5,9 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
@@ -209,12 +211,24 @@ func parseConfig() (config, error) {
 	return cfg, nil
 }
 
+func resolveGitHubToken() string {
+	if token := firstNonEmpty(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN")); token != "" {
+		return token
+	}
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		log.Println("no GitHub token found; using unauthenticated requests (rate-limited). To authenticate, run: gh auth login")
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func newGitHubClient(repo, apiBase string, timeout time.Duration) (*githubClient, error) {
 	owner, repoName, err := splitRepo(repo)
 	if err != nil {
 		return nil, err
 	}
-	token := firstNonEmpty(os.Getenv("GH_TOKEN"), os.Getenv("GITHUB_TOKEN"))
+	token := resolveGitHubToken()
 	gh := github.NewClient(&http.Client{Timeout: timeout}).WithAuthToken(token)
 	if apiBase != defaultAPIBase {
 		base := strings.TrimRight(apiBase, "/") + "/"
