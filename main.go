@@ -101,9 +101,21 @@ type sourceResolution struct {
 	Method  string
 }
 
+type fileMetadata struct {
+	IsNew    bool
+	IsDelete bool
+	IsBinary bool
+
+	RenameFrom string
+	CopyFrom   string
+	OldMode    string
+	NewMode    string
+}
+
 type normalizedDiff struct {
 	Files    map[string][]string
 	LineNums map[string]map[string]int // file -> "ADD content"/"DEL content" -> first line number
+	Meta     map[string]fileMetadata
 	Ignored  []string
 }
 
@@ -136,6 +148,7 @@ func main() {
 	}
 
 	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
 	masterIgnored := make(map[string]struct{})
 	for _, sourcePR := range resolution.Numbers {
 		diffText, err := client.fetchPRDiff(ctx, sourcePR)
@@ -150,7 +163,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		mergeFileMaps(masterFiles, normalized.Files)
+		applyNormalizedDiff(masterFiles, masterMeta, normalized)
 		addIgnored(masterIgnored, normalized.Ignored)
 	}
 
@@ -166,7 +179,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	report := buildReport(cfg.repo, backportPR, resolution, masterFiles, backportNormalized, masterIgnored)
+	report := buildReport(cfg.repo, backportPR, resolution, masterFiles, masterMeta, backportNormalized, masterIgnored)
 	fmt.Print(report)
 
 	if cfg.failOnDiff && strings.Contains(report, "\ndiff -- ") {
@@ -319,6 +332,7 @@ func normalizeDiff(diffText string) (normalizedDiff, error) {
 
 	files := make(map[string][]string)
 	lineNums := make(map[string]map[string]int)
+	metadata := make(map[string]fileMetadata)
 	var ignoredPaths []string
 
 	for _, file := range parsed {
@@ -337,18 +351,26 @@ func normalizeDiff(diffText string) (normalizedDiff, error) {
 			continue
 		}
 
+		meta := fileMetadata{}
 		var lines []string
 		switch {
 		case file.IsNew:
-			lines = append(lines, "META new file")
+			meta.IsNew = true
 		case file.IsDelete:
-			lines = append(lines, "META deleted file")
+			meta.IsDelete = true
 		}
-		if file.IsRename {
-			lines = append(lines, "META rename from "+oldPath, "META rename to "+newPath)
+		if file.IsRename && oldPath != "" && oldPath != "/dev/null" && newPath != "" && newPath != "/dev/null" {
+			meta.RenameFrom = oldPath
+		}
+		if file.IsCopy && oldPath != "" && oldPath != "/dev/null" && newPath != "" && newPath != "/dev/null" {
+			meta.CopyFrom = oldPath
+		}
+		if file.OldMode != 0 && file.NewMode != 0 && file.OldMode != file.NewMode {
+			meta.OldMode = formatMode(file.OldMode)
+			meta.NewMode = formatMode(file.NewMode)
 		}
 		if file.IsBinary {
-			lines = append(lines, "META binary file")
+			meta.IsBinary = true
 		}
 
 		fileLineNums := make(map[string]int)
@@ -395,10 +417,13 @@ func normalizeDiff(diffText string) (normalizedDiff, error) {
 				lineNums[displayPath] = fileLineNums
 			}
 		}
+		if !meta.isZero() {
+			metadata[displayPath] = meta
+		}
 	}
 
 	sort.Strings(ignoredPaths)
-	return normalizedDiff{Files: files, LineNums: lineNums, Ignored: ignoredPaths}, nil
+	return normalizedDiff{Files: files, LineNums: lineNums, Meta: metadata, Ignored: ignoredPaths}, nil
 }
 
 // isBoilerplateLine reports whether content is a bare comment marker or a
@@ -417,7 +442,7 @@ func isBoilerplateLine(content string) bool {
 	return false
 }
 
-func buildReport(repo string, backportPR pullRequest, resolution sourceResolution, masterFiles map[string][]string, backportNormalized normalizedDiff, masterIgnored map[string]struct{}) string {
+func buildReport(repo string, backportPR pullRequest, resolution sourceResolution, masterFiles map[string][]string, masterMeta map[string]fileMetadata, backportNormalized normalizedDiff, masterIgnored map[string]struct{}) string {
 	var builder strings.Builder
 
 	sourcePRURLs := make([]string, len(resolution.Numbers))
@@ -439,10 +464,17 @@ func buildReport(repo string, backportPR pullRequest, resolution sourceResolutio
 	}
 	builder.WriteString("\n")
 
-	paths := unionPaths(masterFiles, backportNormalized.Files)
+	paths := unionPaths(masterFiles, backportNormalized.Files, masterMeta, backportNormalized.Meta)
 	var diffs []string
 	for _, path := range paths {
-		diff := buildFileDiff(path, masterFiles[path], backportNormalized.Files[path], backportNormalized.LineNums[path])
+		diff := buildFileDiff(
+			path,
+			masterFiles[path],
+			masterMeta[path],
+			backportNormalized.Files[path],
+			backportNormalized.Meta[path],
+			backportNormalized.LineNums[path],
+		)
 		if diff != "" {
 			diffs = append(diffs, diff)
 		}
@@ -463,12 +495,16 @@ func buildReport(repo string, backportPR pullRequest, resolution sourceResolutio
 	return builder.String()
 }
 
-// buildFileDiff compares the net changes made by the source PRs (masterLines)
-// against the backport PR (backportLines) for a single file and returns a
-// human-readable diff, or "" when the changes are equivalent.
+// buildFileDiff compares the net changes made by the source PRs (masterLines
+// plus masterMeta) against the backport PR (backportLines plus backportMeta)
+// for a single file and returns a human-readable diff, or "" when the changes
+// are equivalent.
 // backportLineNums maps "ADD content" / "DEL content" keys to the first line
 // number where that change appears in the backport PR's diff.
-func buildFileDiff(path string, masterLines, backportLines []string, backportLineNums map[string]int) string {
+func buildFileDiff(path string, masterLines []string, masterMeta fileMetadata, backportLines []string, backportMeta fileMetadata, backportLineNums map[string]int) string {
+	masterLines = append(metadataLines(masterMeta), masterLines...)
+	backportLines = append(metadataLines(backportMeta), backportLines...)
+
 	// Reduce each side by cancelling ADD/DEL pairs for identical content.
 	masterLines = reduceLines(masterLines)
 	backportLines = reduceLines(backportLines)
@@ -488,13 +524,15 @@ func buildFileDiff(path string, masterLines, backportLines []string, backportLin
 	}
 
 	// Split each side into added vs removed for cleaner section labels.
-	var srcAdd, srcDel, bpAdd, bpDel []string
+	var srcAdd, srcDel, srcMetaOnly, bpAdd, bpDel, bpMetaOnly []string
 	for _, line := range masterOnly {
 		switch {
 		case strings.HasPrefix(line, "ADD "):
 			srcAdd = append(srcAdd, line[4:])
 		case strings.HasPrefix(line, "DEL "):
 			srcDel = append(srcDel, line[4:])
+		case strings.HasPrefix(line, "META "):
+			srcMetaOnly = append(srcMetaOnly, line[5:])
 		}
 	}
 	for _, line := range backportOnly {
@@ -503,6 +541,8 @@ func buildFileDiff(path string, masterLines, backportLines []string, backportLin
 			bpAdd = append(bpAdd, line[4:])
 		case strings.HasPrefix(line, "DEL "):
 			bpDel = append(bpDel, line[4:])
+		case strings.HasPrefix(line, "META "):
+			bpMetaOnly = append(bpMetaOnly, line[5:])
 		}
 	}
 
@@ -546,6 +586,30 @@ func buildFileDiff(path string, masterLines, backportLines []string, backportLin
 	// Backport-only sections: annotate with the line number in the backport diff.
 	writeSection("  backport added, source missing:\n", '+', bpAdd, backportLineNums, "ADD ")
 	writeSection("  backport removed, source kept:\n", '-', bpDel, backportLineNums, "DEL ")
+
+	writeMetaSection := func(header string, lines []string) {
+		if len(lines) == 0 {
+			return
+		}
+		b.WriteString(header)
+		for i := 0; i < len(lines); {
+			content := lines[i]
+			count := 1
+			for i+count < len(lines) && lines[i+count] == content {
+				count++
+			}
+			b.WriteString("\t~ ")
+			b.WriteString(content)
+			if count > 1 {
+				fmt.Fprintf(&b, "\t(×%d)", count)
+			}
+			b.WriteByte('\n')
+			i += count
+		}
+	}
+
+	writeMetaSection("  source metadata, backport missing:\n", srcMetaOnly)
+	writeMetaSection("  backport metadata, source missing:\n", bpMetaOnly)
 
 	return b.String()
 }
@@ -657,6 +721,29 @@ func metaLines(lines []string) []string {
 	return out
 }
 
+func metadataLines(meta fileMetadata) []string {
+	var lines []string
+	if meta.IsNew {
+		lines = append(lines, "META new file")
+	}
+	if meta.IsDelete {
+		lines = append(lines, "META deleted file")
+	}
+	if meta.CopyFrom != "" {
+		lines = append(lines, "META copy from "+meta.CopyFrom)
+	}
+	if meta.RenameFrom != "" {
+		lines = append(lines, "META rename from "+meta.RenameFrom)
+	}
+	if meta.OldMode != "" && meta.NewMode != "" {
+		lines = append(lines, "META old mode "+meta.OldMode, "META new mode "+meta.NewMode)
+	}
+	if meta.IsBinary {
+		lines = append(lines, "META binary file")
+	}
+	return lines
+}
+
 func slicesEqual[T comparable](a, b []T) bool {
 	if len(a) != len(b) {
 		return false
@@ -735,19 +822,47 @@ func mergeFileMaps(dst, src map[string][]string) {
 	}
 }
 
+func applyNormalizedDiff(dstFiles map[string][]string, dstMeta map[string]fileMetadata, src normalizedDiff) {
+	paths := unionPaths(dstFiles, src.Files, dstMeta, src.Meta)
+	for _, path := range paths {
+		meta, hasMeta := src.Meta[path]
+		if hasMeta && meta.RenameFrom != "" && meta.RenameFrom != path {
+			moveFileState(dstFiles, dstMeta, meta.RenameFrom, path)
+		}
+
+		if lines := src.Files[path]; len(lines) > 0 {
+			dstFiles[path] = append(dstFiles[path], lines...)
+		}
+		if hasMeta {
+			merged := mergeFileMetadata(dstMeta[path], meta)
+			if merged.isZero() {
+				delete(dstMeta, path)
+			} else {
+				dstMeta[path] = merged
+			}
+		}
+	}
+}
+
 func addIgnored(dst map[string]struct{}, ignored []string) {
 	for _, path := range ignored {
 		dst[path] = struct{}{}
 	}
 }
 
-func unionPaths(a, b map[string][]string) []string {
-	seen := make(map[string]struct{}, len(a)+len(b))
-	for path := range a {
-		seen[path] = struct{}{}
-	}
-	for path := range b {
-		seen[path] = struct{}{}
+func unionPaths(fileMaps ...any) []string {
+	seen := make(map[string]struct{})
+	for _, item := range fileMaps {
+		switch m := item.(type) {
+		case map[string][]string:
+			for path := range m {
+				seen[path] = struct{}{}
+			}
+		case map[string]fileMetadata:
+			for path := range m {
+				seen[path] = struct{}{}
+			}
+		}
 	}
 	return mapKeysSorted(seen)
 }
@@ -804,4 +919,72 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (m fileMetadata) isZero() bool {
+	return !m.IsNew &&
+		!m.IsDelete &&
+		!m.IsBinary &&
+		m.RenameFrom == "" &&
+		m.CopyFrom == "" &&
+		m.OldMode == "" &&
+		m.NewMode == ""
+}
+
+func mergeFileMetadata(dst, src fileMetadata) fileMetadata {
+	dst.IsNew = dst.IsNew || src.IsNew
+	dst.IsDelete = dst.IsDelete || src.IsDelete
+	dst.IsBinary = dst.IsBinary || src.IsBinary
+
+	if dst.IsNew || dst.IsDelete {
+		dst.OldMode = ""
+		dst.NewMode = ""
+	}
+
+	if dst.CopyFrom == "" && src.CopyFrom != "" {
+		dst.CopyFrom = src.CopyFrom
+		dst.RenameFrom = ""
+	}
+	if dst.CopyFrom == "" && dst.RenameFrom == "" && !dst.IsNew && src.RenameFrom != "" {
+		dst.RenameFrom = src.RenameFrom
+	}
+
+	if !dst.IsNew && !dst.IsDelete && src.OldMode != "" && src.NewMode != "" {
+		switch {
+		case dst.NewMode == "":
+			dst.OldMode = src.OldMode
+			dst.NewMode = src.NewMode
+		case dst.NewMode == src.OldMode:
+			dst.NewMode = src.NewMode
+		default:
+			if dst.OldMode == "" {
+				dst.OldMode = src.OldMode
+			}
+			dst.NewMode = src.NewMode
+		}
+		if dst.OldMode == dst.NewMode {
+			dst.OldMode = ""
+			dst.NewMode = ""
+		}
+	}
+
+	return dst
+}
+
+func moveFileState(dstFiles map[string][]string, dstMeta map[string]fileMetadata, oldPath, newPath string) {
+	if oldPath == "" || newPath == "" || oldPath == newPath {
+		return
+	}
+	if lines, ok := dstFiles[oldPath]; ok {
+		dstFiles[newPath] = append(dstFiles[newPath], lines...)
+		delete(dstFiles, oldPath)
+	}
+	if meta, ok := dstMeta[oldPath]; ok {
+		dstMeta[newPath] = meta
+		delete(dstMeta, oldPath)
+	}
+}
+
+func formatMode(mode os.FileMode) string {
+	return fmt.Sprintf("%06o", mode)
 }

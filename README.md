@@ -9,6 +9,8 @@ A command-line tool that validates backport pull requests by comparing their dif
 - **Diff normalization**: Filters out:
   - License boilerplate (Apache 2.0, AGPL 3.0 headers)
   - Protobuf-generated files (`.pb.go`, `.pb.ts`, etc.)
+  - File rename chains across multiple source PRs
+  - Pure file copies and mode-only diffs
   - Reindentation and whitespace-only changes
   - Trivial word-only changes in comments
 - **Clear diff reporting**: Shows exactly what was added or removed in the backport vs. source
@@ -111,4 +113,3 @@ No differences found.
 
 - Maximum 250 commits per PR (GitHub API limit)
 - Requires source PRs to be explicitly referenced in the backport PR body or commit messages
-

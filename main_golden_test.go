@@ -86,6 +86,7 @@ func runGoldenCase(t *testing.T, dir string) string {
 	sort.Strings(sources)
 
 	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
 	masterIgnored := make(map[string]struct{})
 	sourcePRNums := make([]int, len(sources))
 
@@ -99,7 +100,7 @@ func runGoldenCase(t *testing.T, dir string) string {
 		if err != nil {
 			t.Fatalf("normalizeDiff %s: %v", srcPath, err)
 		}
-		mergeFileMaps(masterFiles, normalized.Files)
+		applyNormalizedDiff(masterFiles, masterMeta, normalized)
 		addIgnored(masterIgnored, normalized.Ignored)
 	}
 	// Fall back to a single stub source PR when no source files exist.
@@ -121,6 +122,7 @@ func runGoldenCase(t *testing.T, dir string) string {
 		pullRequest{Number: 200, Title: "Test backport"},
 		sourceResolution{Numbers: sourcePRNums, Method: "body markers"},
 		masterFiles,
+		masterMeta,
 		backportNormalized,
 		masterIgnored,
 	)

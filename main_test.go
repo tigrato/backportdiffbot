@@ -138,11 +138,305 @@ func TestNormalizeDiffIgnoresGeneratedProtobufFiles(t *testing.T) {
 	}
 }
 
+func TestNormalizeDiffCapturesRenamesSeparately(t *testing.T) {
+	diffText := strings.Join([]string{
+		"diff --git a/lib/old.go b/lib/new.go",
+		"similarity index 100%",
+		"rename from lib/old.go",
+		"rename to lib/new.go",
+	}, "\n")
+
+	normalized, err := normalizeDiff(diffText)
+	if err != nil {
+		t.Fatalf("normalizeDiff returned error: %v", err)
+	}
+
+	if len(normalized.Files) != 0 {
+		t.Fatalf("rename-only diff should not produce file lines: %v", normalized.Files)
+	}
+	meta := normalized.Meta["lib/new.go"]
+	if meta.RenameFrom != "lib/old.go" {
+		t.Fatalf("unexpected rename metadata: %+v", meta)
+	}
+}
+
+func TestNormalizeDiffCapturesCopyAndModeMetadata(t *testing.T) {
+	diffText := strings.Join([]string{
+		"diff --git a/lib/original.go b/lib/copied.go",
+		"similarity index 100%",
+		"copy from lib/original.go",
+		"copy to lib/copied.go",
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"old mode 100644",
+		"new mode 100755",
+	}, "\n")
+
+	normalized, err := normalizeDiff(diffText)
+	if err != nil {
+		t.Fatalf("normalizeDiff returned error: %v", err)
+	}
+
+	copyMeta := normalized.Meta["lib/copied.go"]
+	if copyMeta.CopyFrom != "lib/original.go" {
+		t.Fatalf("unexpected copy metadata: %+v", copyMeta)
+	}
+
+	modeMeta := normalized.Meta["bin/tool.sh"]
+	if modeMeta.OldMode != "100644" || modeMeta.NewMode != "100755" {
+		t.Fatalf("unexpected mode metadata: %+v", modeMeta)
+	}
+}
+
+func TestApplyNormalizedDiffMovesRenamedSourceState(t *testing.T) {
+	addedDiff := strings.Join([]string{
+		"diff --git a/lib/old.go b/lib/old.go",
+		"new file mode 100644",
+		"index 0000000..1111111",
+		"--- /dev/null",
+		"+++ b/lib/old.go",
+		"@@ -0,0 +1,2 @@",
+		"+package lib",
+		"+const answer = 42",
+	}, "\n")
+	renameDiff := strings.Join([]string{
+		"diff --git a/lib/old.go b/lib/new.go",
+		"similarity index 100%",
+		"rename from lib/old.go",
+		"rename to lib/new.go",
+	}, "\n")
+	backportDiff := strings.Join([]string{
+		"diff --git a/lib/new.go b/lib/new.go",
+		"new file mode 100644",
+		"index 0000000..1111111",
+		"--- /dev/null",
+		"+++ b/lib/new.go",
+		"@@ -0,0 +1,2 @@",
+		"+package lib",
+		"+const answer = 42",
+	}, "\n")
+
+	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
+	added, err := normalizeDiff(addedDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff add returned error: %v", err)
+	}
+	applyNormalizedDiff(masterFiles, masterMeta, added)
+
+	renamed, err := normalizeDiff(renameDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff rename returned error: %v", err)
+	}
+	applyNormalizedDiff(masterFiles, masterMeta, renamed)
+
+	if _, ok := masterFiles["lib/old.go"]; ok {
+		t.Fatalf("old path still present after rename: %v", masterFiles)
+	}
+	if _, ok := masterMeta["lib/old.go"]; ok {
+		t.Fatalf("old metadata path still present after rename: %v", masterMeta)
+	}
+
+	backportNormalized, err := normalizeDiff(backportDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff backport returned error: %v", err)
+	}
+
+	report := buildReport(
+		"acme/myrepo",
+		pullRequest{Number: 200, Title: "Rename chain"},
+		sourceResolution{Numbers: []int{100, 101}, Method: "body markers"},
+		masterFiles,
+		masterMeta,
+		backportNormalized,
+		nil,
+	)
+
+	if !strings.Contains(report, "No differences after filtering protobuf-generated files.") {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
+func TestBuildReport_NoDiffsForPureRename(t *testing.T) {
+	diffText := strings.Join([]string{
+		"diff --git a/lib/old.go b/lib/new.go",
+		"similarity index 100%",
+		"rename from lib/old.go",
+		"rename to lib/new.go",
+	}, "\n")
+
+	normalized, err := normalizeDiff(diffText)
+	if err != nil {
+		t.Fatalf("normalizeDiff returned error: %v", err)
+	}
+
+	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
+	applyNormalizedDiff(masterFiles, masterMeta, normalized)
+
+	report := buildReport(
+		"acme/myrepo",
+		pullRequest{Number: 200, Title: "Pure rename"},
+		sourceResolution{Numbers: []int{100}, Method: "body markers"},
+		masterFiles,
+		masterMeta,
+		normalized,
+		nil,
+	)
+
+	if !strings.Contains(report, "No differences after filtering protobuf-generated files.") {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
+func TestBuildReport_NoDiffsForPureCopy(t *testing.T) {
+	diffText := strings.Join([]string{
+		"diff --git a/lib/original.go b/lib/copied.go",
+		"similarity index 100%",
+		"copy from lib/original.go",
+		"copy to lib/copied.go",
+	}, "\n")
+
+	normalized, err := normalizeDiff(diffText)
+	if err != nil {
+		t.Fatalf("normalizeDiff returned error: %v", err)
+	}
+
+	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
+	applyNormalizedDiff(masterFiles, masterMeta, normalized)
+
+	report := buildReport(
+		"acme/myrepo",
+		pullRequest{Number: 200, Title: "Pure copy"},
+		sourceResolution{Numbers: []int{100}, Method: "body markers"},
+		masterFiles,
+		masterMeta,
+		normalized,
+		nil,
+	)
+
+	if !strings.Contains(report, "No differences after filtering protobuf-generated files.") {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
+func TestApplyNormalizedDiffComposesModeChanges(t *testing.T) {
+	modeDiffOne := strings.Join([]string{
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"old mode 100644",
+		"new mode 100755",
+	}, "\n")
+	modeDiffTwo := strings.Join([]string{
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"old mode 100755",
+		"new mode 100700",
+	}, "\n")
+	backportDiff := strings.Join([]string{
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"old mode 100644",
+		"new mode 100700",
+	}, "\n")
+
+	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
+
+	first, err := normalizeDiff(modeDiffOne)
+	if err != nil {
+		t.Fatalf("normalizeDiff modeDiffOne returned error: %v", err)
+	}
+	applyNormalizedDiff(masterFiles, masterMeta, first)
+
+	second, err := normalizeDiff(modeDiffTwo)
+	if err != nil {
+		t.Fatalf("normalizeDiff modeDiffTwo returned error: %v", err)
+	}
+	applyNormalizedDiff(masterFiles, masterMeta, second)
+
+	backportNormalized, err := normalizeDiff(backportDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff backportDiff returned error: %v", err)
+	}
+
+	report := buildReport(
+		"acme/myrepo",
+		pullRequest{Number: 200, Title: "Mode change"},
+		sourceResolution{Numbers: []int{100, 101}, Method: "body markers"},
+		masterFiles,
+		masterMeta,
+		backportNormalized,
+		nil,
+	)
+
+	if !strings.Contains(report, "No differences after filtering protobuf-generated files.") {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
+func TestApplyNormalizedDiffIgnoresModeAfterNewFile(t *testing.T) {
+	addedDiff := strings.Join([]string{
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"new file mode 100644",
+		"index 0000000..1111111",
+		"--- /dev/null",
+		"+++ b/bin/tool.sh",
+		"@@ -0,0 +1 @@",
+		"+echo hello",
+	}, "\n")
+	modeDiff := strings.Join([]string{
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"old mode 100644",
+		"new mode 100755",
+	}, "\n")
+	backportDiff := strings.Join([]string{
+		"diff --git a/bin/tool.sh b/bin/tool.sh",
+		"new file mode 100755",
+		"index 0000000..1111111",
+		"--- /dev/null",
+		"+++ b/bin/tool.sh",
+		"@@ -0,0 +1 @@",
+		"+echo hello",
+	}, "\n")
+
+	masterFiles := make(map[string][]string)
+	masterMeta := make(map[string]fileMetadata)
+
+	added, err := normalizeDiff(addedDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff addedDiff returned error: %v", err)
+	}
+	applyNormalizedDiff(masterFiles, masterMeta, added)
+
+	modeOnly, err := normalizeDiff(modeDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff modeDiff returned error: %v", err)
+	}
+	applyNormalizedDiff(masterFiles, masterMeta, modeOnly)
+
+	backportNormalized, err := normalizeDiff(backportDiff)
+	if err != nil {
+		t.Fatalf("normalizeDiff backportDiff returned error: %v", err)
+	}
+
+	report := buildReport(
+		"acme/myrepo",
+		pullRequest{Number: 200, Title: "New file with chmod"},
+		sourceResolution{Numbers: []int{100, 101}, Method: "body markers"},
+		masterFiles,
+		masterMeta,
+		backportNormalized,
+		nil,
+	)
+
+	if !strings.Contains(report, "No differences after filtering protobuf-generated files.") {
+		t.Fatalf("unexpected report: %q", report)
+	}
+}
+
 func TestBuildFileDiff(t *testing.T) {
 	master := []string{"DEL old", "ADD shared", "ADD master-only"}
 	backport := []string{"DEL old", "ADD shared", "ADD backport-only"}
 
-	diff := buildFileDiff("lib/auth/auth.go", master, backport, nil)
+	diff := buildFileDiff("lib/auth/auth.go", master, fileMetadata{}, backport, fileMetadata{}, nil)
 
 	for _, needle := range []string{
 		"diff -- lib/auth/auth.go",
@@ -171,6 +465,7 @@ func TestBuildReport_NoDiffs(t *testing.T) {
 				"ADD \ts.Log.InfoContext(ctx, \"Access graph AWS discovery iteration started\")",
 			},
 		},
+		nil,
 		normalizedDiff{
 			Files: map[string][]string{
 				"lib/srv/discovery/access_graph_aws.go": {
